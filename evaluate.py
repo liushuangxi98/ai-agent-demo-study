@@ -27,6 +27,13 @@ def run_evaluation(app: AgentApp, run_id: str) -> dict[str, Any]:
         """运行一道评测题并追加结果；异常时记录失败并继续下一题。"""
         try:
             result = app.chat(session, question)
+            # 无人在场，破坏性操作一律拒绝；最多处理三次，防止模型反复请求。
+            for _ in range(3):
+                if result.get("status") != "pending_approval":
+                    break
+                result = app.resume(session, {"type": "reject", "message": "评测环境拒绝执行审批操作"})
+            if result.get("status") == "pending_approval":
+                raise RuntimeError("待审批操作未结束")
             # 关键词只做字面包含；同义表达可能误判，报告保留原文供人工复核。
             answer_ok = all(word in result["answer"] for word in words)
             used_tools = [item["tool"] for item in result["trace"] if item.get("kind") != "reflection"]

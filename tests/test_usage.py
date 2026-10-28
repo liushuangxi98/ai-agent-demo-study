@@ -7,6 +7,7 @@ from unittest.mock import Mock
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.memory import InMemorySaver
 
 import agent_demo.agent as agent_module
 from agent_demo.agent import AgentApp
@@ -85,6 +86,8 @@ def test_direct_results_include_tools_reflection_memory_and_chat_elapsed(
     app = AgentApp.__new__(AgentApp)
     app.settings = replace(settings, reflection_enabled=reflection_enabled, context_token_budget=1 if with_summary else 50000, summary_keep_turns=1)  # 使用低阈值制造摘要场景。
     app.llm = llm
+    app.pending = {}
+    app.checkpointer = InMemorySaver()
     app.memory = Mock()
     # 故意给历史消息附带很大的旧用量，确认它不会再被计算到本轮。
     app.memory.context.return_value = (  # 历史行携带旧统计，但主流程只把问答正文转换成消息。

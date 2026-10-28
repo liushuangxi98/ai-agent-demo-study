@@ -17,6 +17,7 @@ documents.py 把文件抠成了整段文字，但一本书几十万字，不能�
 | `_prepare_chunks()` | 裁纸条、贴标签、算指纹（不花钱）|
 | `ingest()` | 对账：新旧清单一比，只给新纸条做名片 |
 | `upload()` | 收新书：存原件，再走一遍对账 |
+| `delete()` | 删一份知识文档：删原件，再对账清切片 |
 | `retrieve()` | 按问题借纸条 |
 | `context()` | 借书+排版一条龙，给工具直接用 |
 
@@ -100,7 +101,7 @@ for document in documents:
 
 诚实提醒：改了文章**开头**加一段话，后面所有纸条的内容和编号都可能连锁变化——重新做名片的不只你改那句。这是裁纸的固有代价，不是 bug。
 
-最后：两张目录都没纸可裁就 `raise ValueError`，**绝不返回空列表**——空列表会让下一步把整个书架全删光。防呆卡死在这，而不是让"误删库"发生。
+最后：两张目录都没纸可裁时返回两个空列表。空库是允许的状态，`ingest()` 会清掉旧切片；这样删除最后一份文档后，应用仍能正常启动和问答。
 
 ## 3. `ingest()`：拿新旧清单对账
 
@@ -108,6 +109,10 @@ for document in documents:
 with self.lock:
     chunks, ids = self._prepare_chunks()
     old_ids = set(self.store.get()["ids"])
+    if not chunks:
+        if old_ids:
+            self.store.delete(ids=list(old_ids))
+        return 0
     new_chunks, new_ids = [], []
     for chunk, chunk_id in zip(chunks, ids):
         if chunk_id not in old_ids:
@@ -121,6 +126,8 @@ with self.lock:
 
 先拿锁，再读原件和切片，直到索引更新完成才放开。这是为了避免“旧同步先读旧文件，后来又把新上传的索引覆盖回去”。锁只协调同一进程中使用这个知识库对象的线程，不是跨进程的文件锁。
 
+**没有文档时**，把旧索引全部清掉并返回 0：删除最后一份文档、目录暂时为空，都靠这一步收尾。
+
 对着代码读这段对账账本：
 
 | 情况 | 处理 | 花钱吗 |
@@ -128,6 +135,7 @@ with self.lock:
 | 新旧清单都有 A、B | 原样留着 | 不花 |
 | 只有新清单有 D（你新传的/改过的纸条）| `add_documents`：做名片+上架 | 只花 D 的 |
 | 只有旧清单有 C（你删了文件/改了内容后的旧纸条）| `delete` 下架 | — |
+| 两份清单都空 | 清空旧切片，返回 0 | — |
 
 - `zip(chunks, ids)` 拉拉链：两列表按位置配对，第 i 张纸条配第 i 个指纹；
 - `old_ids - set(ids)` 集合差："旧有、新没有"=过时；
@@ -149,15 +157,40 @@ return {"files": names, "chunks": count}
 
 断点续传式的安心设计：原件先存上了，就算后面做名片时断网，文件不会丢；修好网络点"同步知识库"再走一遍 ingest 就行。
 
-## 5. `retrieve()`：按问题借书
+## 5. `delete()`：删一份知识文档
+
+`delete_knowledge` 工具最终调用的就是它：
 
 ```python
-if not self.store.get(limit=1)["ids"]:
-    raise ValueError("知识库为空，请点击侧栏的"同步知识库"")
+raw = source.strip()
+if not raw or Path(raw).is_absolute() or ".." in Path(raw).parts:
+    return "source 必须是知识文档来源名，例如 course.md 或 uploads/notes.txt"
+if raw.startswith("uploads/"):
+    root, relative = self.uploads_dir, raw.removeprefix("uploads/")
+else:
+    root, relative = self.settings.docs_dir, raw
+target = (root / relative).resolve()
+if root.resolve() not in target.parents:
+    return "source 必须位于知识目录内"
+target.unlink()
+count = self.ingest()
+```
+
+- `course.md`、`agent.md` 指预置资料；`uploads/notes.txt` 指上传文件；
+- 绝对路径、`..`、目录外路径一律拒绝，防止删到 `.env` 或源码；
+- 删的是**原件**，再靠 `ingest()` 的指纹对账移出旧切片；下次同步不会又加回来；
+- 删掉预置资料后，可以用 git 恢复。
+
+## 6. `retrieve()`：按问题借书
+
+```python
+if self.is_empty():
+    return []
 matches = self.store.similarity_search_with_score(query, k=self.settings.rag_top_k)
 ```
 
-- 先探一眼书架：**空架是事故**（raise），有架但本题没查到是常态——两种情况处理完全不同；
+- 空架不再当成事故：返回空列表，`context()` 会回一句“知识库为空”，整轮问答继续；
+- 有架但本题没查到是常态；
 - 把问题递给 Chroma：内部自动做问题名片（这就是 embeddings.md 说的"框架代调"）、比远近、带回最近的 k 个候选（默认 3）。
 
 ```python
@@ -172,9 +205,11 @@ for document, distance in matches:
 
 每条命中带四个标签交给上层：`source` 哪份原件、`chunk` 第几号纸条、`distance` 多远、`text` 原文。
 
-## 6. `context()`：检索与排版一条龙
+## 7. `context()`：检索与排版一条龙
 
 ```python
+if self.is_empty():
+    return "知识库为空，请先上传或同步文档。"
 hits = self.retrieve(query)
 if not hits:
     return "知识库未找到足够相关的证据。"
@@ -192,9 +227,9 @@ return "\n\n".join(passages)
 
 这几行拼接直接放在 `context()` 中，不再额外跳到另一个排版方法。列表推导式逐段生成 `passages`，`"\n\n".join(...)` 用空行把各段连接起来。来源编号的样子没有改变。
 
-`context()` 只是把两步连起来：查到 → 排版；没查到 → 回一句"知识库未找到足够相关的证据。"**这句提示本身就是给模型的证据**："书架没有依据"这个事实也 informs 模型别硬编人物/课程类事实。检索查到与否不禁止模型答常识、不禁止它用计算器；但接口真炸了会一路抛异常，本轮问答中止，不会带病继续。
+`context()` 只是把两步连起来：空库 → 回“知识库为空”；查到 → 排版；没查到 → 回一句"知识库未找到足够相关的证据。"**这句提示本身就是给模型的证据**："书架没有依据"这个事实也 informs 模型别硬编人物/课程类事实。检索查到与否不禁止模型答常识、不禁止它用计算器；但接口真炸了会一路抛异常，本轮问答中止，不会带病继续。
 
-## 7. 走一遍：从上传到答案的完整接力
+## 8. 走一遍：从上传到答案的完整接力
 
 | 步 | 谁 | 干什么 |
 | --- | --- | --- |
@@ -213,7 +248,7 @@ return "\n\n".join(passages)
 ## 本篇要带走的三句话
 
 1. 指纹对账是本文件的心脏：内容变没变 = 指纹在不在旧清单，省钱和增量全靠它；
-2. 先加后删、空列表报错、版本哈希换柜——三处都是"宁可多做防御，不给事故开门"；
+2. 先加后删、空库清索引、版本哈希换柜——三处都是"宁可多做防御，不给事故开门"；
 3. 检索永远会还你"最像的 k 个"，**距离阈值才是说"不"的那个人**。
 
 继续读：[memory.py：档案室——聊天记录和画像的仓库](D:/study/AI/ai-agent-demo-study/docs/code-guide/memory.md)。

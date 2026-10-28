@@ -29,6 +29,8 @@ def summary_chat(monkeypatch, settings):  # 只隔离外部资源，保留真实
     app = AgentApp.__new__(AgentApp)  # 避免构造时连接真实 MySQL 和 Chroma。
     app.settings = settings  # 使用默认 50000 阈值与保留 6 轮。
     app.llm = Mock()  # 摘要调用由此替身返回完整模型消息。
+    app.pending = {}
+    app.checkpointer = Mock()
     app.llm.invoke.return_value = model_reply(110, "新的累计摘要")  # 摘要费用应计入本轮统计。
     app.memory = Mock()  # 记录读写参数，核对快照与用量。
     turns = [{"id": 10 + index * 3, "user_text": f"原问题{index}", "assistant_text": f"原回答{index}"} for index in range(8)]  # ID 故意不连续。

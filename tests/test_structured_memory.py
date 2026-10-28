@@ -310,6 +310,8 @@ def memory_chat(monkeypatch, settings):
     app = AgentApp.__new__(AgentApp)
     app.settings = settings
     app.llm = Mock()
+    app.pending = {}
+    app.checkpointer = Mock()
     app.memory = Mock()
     app.memory.context.return_value = ([], {}, {})  # 模拟新会话没有原文或摘要，用户共享画像仍可用。
     # 画像里预先放好“姓名=晨星”，来源标记为第 55 轮。

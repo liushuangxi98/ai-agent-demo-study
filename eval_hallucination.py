@@ -273,6 +273,13 @@ def run_cases(app: AgentApp, cases: list[dict[str, Any]], run_id: str) -> dict[s
         session = f"hall_{run_id}_{case['id']}"
         try:
             result = app.chat(session, case["question"])
+            # 无人在场，破坏性操作一律拒绝；最多处理三次，防止模型反复请求。
+            for _ in range(3):
+                if result.get("status") != "pending_approval":
+                    break
+                result = app.resume(session, {"type": "reject", "message": "评测环境拒绝执行审批操作"})
+            if result.get("status") == "pending_approval":
+                raise RuntimeError("待审批操作未结束")
         except Exception as error:
             # 单条失败不中断整轮；只记异常类型，详情可能带请求内容。
             rows.append({"id": case["id"], "type": case["type"], "status": "error",

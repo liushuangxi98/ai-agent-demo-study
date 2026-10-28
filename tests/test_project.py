@@ -62,16 +62,19 @@ def test_calculator_rejects_unsupported_input(expression):
 
 
 # ---------------------------------------------------------------------------
-# 注册工具：剩余三件工具能正常使用
+# 注册工具：四件工具都能正常使用
 # ---------------------------------------------------------------------------
 def test_registered_tools_keep_knowledge_search_and_local_time():
     knowledge = Mock()
     knowledge.context.return_value = "[course.md#0]\n课程资料"
     tools = {tool.name: tool for tool in build_tools(knowledge)}
 
-    assert set(tools) == {"calculator", "current_time", "knowledge_search"}
+    assert set(tools) == {"calculator", "current_time", "knowledge_search", "delete_knowledge"}
     assert tools["knowledge_search"].invoke({"query": "退款"}) == "[course.md#0]\n课程资料"
     knowledge.context.assert_called_once_with("退款")
+    knowledge.delete.return_value = "已删除 course.md"
+    assert tools["delete_knowledge"].invoke({"source": "course.md"}) == "已删除 course.md"
+    knowledge.delete.assert_called_once_with("course.md")
     assert tools["current_time"].invoke({}).startswith("当前时间：")
 
 
@@ -177,6 +180,8 @@ def local_chat(monkeypatch, settings):
     app.llm = object()          # chat() 只把它转手交给 create_agent，内容无所谓
     app.knowledge = Mock()
     app.memory = Mock()
+    app.pending = {}
+    app.checkpointer = Mock()
 
     # 给假对象预设“被调用时返回什么”。
     app.memory.profile.return_value = {}
@@ -315,6 +320,7 @@ def test_empty_knowledge_result_does_not_instruct_every_answer_to_be_unknown():
     # 又用了一次“造对象但跳过 __init__”的技巧：这里只测 context 一个方法，
     # 不需要真的去连向量库。
     knowledge = KnowledgeBase.__new__(KnowledgeBase)
+    knowledge.is_empty = Mock(return_value=False)
     # 让检索永远返回空列表，模拟“什么都没找到”。
     knowledge.retrieve = Mock(return_value=[])
 

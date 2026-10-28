@@ -69,7 +69,8 @@ def session_page(monkeypatch, settings):
     knowledge.ingest.return_value = 12
     knowledge.upload.return_value = {"files": ["lesson.txt"], "chunks": 13}
     app = SimpleNamespace(
-        settings=settings, memory=memory, knowledge=knowledge, chat=Mock(side_effect=chat),
+        settings=settings, memory=memory, knowledge=knowledge,
+        chat=Mock(side_effect=chat), resume=Mock(),
     )
 
     # 在页面导入前替换构造入口，避免 AgentApp 初始化读取真实知识库或调用 API。
@@ -435,3 +436,36 @@ def test_saved_reflection_is_visible_beside_legacy_tool_trace(session_page, stat
     messages = page.warning if status.endswith("failed") else page.caption
     assert any("虚构检查状态：" + status in item.value for item in messages)
     app.chat.assert_not_called()
+
+
+@pytest.mark.parametrize("label, decision", [
+    ("批准执行", {"type": "approve"}),
+    ("拒绝", {"type": "reject", "message": "用户拒绝"}),
+])
+def test_pending_approval_card_resumes_with_decision(session_page, label, decision):
+    page, app = session_page
+    sid = page.session_state["sid"]
+    pending = {
+        "status": "pending_approval",
+        "session_id": sid,
+        "actions": [{"tool": "delete_knowledge", "args": {"source": "course.md"},
+                     "description": "删除知识文档"}],
+    }
+    app.chat.side_effect = lambda _sid, _question: pending
+    app.resume.return_value = {
+        "answer": "已处理", "trace": [], "memory_warning": "", "usage": {},
+    }
+
+    page.chat_input[0].set_value("删除 course.md").run()
+
+    assert not page.exception
+    assert any("人工审批" in item.value for item in page.warning)
+    assert any(isinstance(json.loads(item.value), list) for item in page.json)
+    assert not page.chat_input
+
+    next(button for button in page.button if button.label == label).click().run()
+
+    assert not page.exception
+    assert app.resume.call_args.args[1] == decision
+    assert page.session_state["pending_approval"] is None
+    assert page.chat_input

@@ -1,4 +1,4 @@
-"""注册三个工具：模型给出工具名和参数，LangChain 执行 Python 函数。
+"""注册四个工具：模型给出工具名和参数，LangChain 执行 Python 函数。
 
 build_tools() 用闭包保存知识库，模型只填写工具业务参数。
 """
@@ -13,7 +13,7 @@ from agent_demo.rag import KnowledgeBase
 
 
 def build_tools(knowledge: KnowledgeBase) -> list[BaseTool]:
-    """参数：knowledge 供 knowledge_search 查询；返回三个工具对象。
+    """参数：knowledge 供知识检索和删除使用；返回四个工具对象。
 
     @tool 函数的三引号 docstring 是发给模型的工具说明书，不是普通注释。
     """
@@ -66,4 +66,9 @@ def build_tools(knowledge: KnowledgeBase) -> list[BaseTool]:
         # 闭包：工具记住了外层传入的知识库，模型只填写检索词。
         return knowledge.context(query)
 
-    return [calculator, current_time, knowledge_search]
+    @tool
+    def delete_knowledge(source: str) -> str:
+        """删除一份知识文档；需要人工批准。source 用来源名，如 course.md 或 uploads/notes.txt。"""
+        return knowledge.delete(source)
+
+    return [calculator, current_time, knowledge_search, delete_knowledge]

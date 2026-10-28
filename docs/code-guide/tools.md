@@ -1,4 +1,4 @@
-# tools.py：给失忆天才准备的三个工具箱
+# tools.py：给失忆天才准备的工具箱（四件工具）
 
 对应源码：[agent_demo/tools.py](D:/study/AI/ai-agent-demo-study/agent_demo/tools.py) · [返回导航](D:/study/AI/ai-agent-demo-study/docs/code-guide/README.md)
 
@@ -6,15 +6,16 @@
 
 大模型只会"说"，不会"做"。它可以说"我来算一下 (12+8)*3"，但这句话本身一个数都算不出来；它也永远不知道"现在几点"，也不能自己打开你的知识库。
 
-`tools.py` 就是**给模型配的工具箱**，里面三件工具：
+`tools.py` 就是**给模型配的工具箱**，里面四件工具：
 
 | 工具 | 干嘛 | 为什么需要 |
 | --- | --- | --- |
 | `calculator` | 算数学式子 | 模型心算容易翻车 |
 | `current_time` | 查电脑当前时间 | 模型的"时间感"停在训练那天 |
 | `knowledge_search` | 搜知识库 | 让它能自己再去翻资料 |
+| `delete_knowledge` | 删一份知识文档 | 演示破坏性操作必须人工批准 |
 
-文件里只有一个对外函数 `build_tools()`，三个工具函数全写在它**肚子里**。
+文件里只有一个对外函数 `build_tools()`，四个工具函数全写在它**肚子里**。
 
 ## 1. 先看懂一轮"递单子"的完整来回
 
@@ -32,11 +33,11 @@
 
 ```python
 def build_tools(knowledge):
-    # 肚子里定义三个工具函数
-    return [calculator, current_time, knowledge_search]
+    # 肚子里定义四个工具函数
+    return [calculator, current_time, knowledge_search, delete_knowledge]
 ```
 
-只传进一个参数：知识库管理员。最后一行只是**把三个工具装进列表交出去**，没有执行任何一个。
+只传进一个参数：知识库管理员。最后一行只是**把四个工具装进列表交出去**，没有执行任何一个。
 
 ### `@tool`：给普通函数贴上"说明书"
 
@@ -57,11 +58,11 @@ def knowledge_search(query: str) -> str:
 
 包好的工具用 `.invoke({"query": "课程退款条件"})` 真正执行，字典的键必须和参数名对上。
 
-### 为什么把三个函数写在 `build_tools` 肚子里？（闭包）
+### 为什么把四个函数写在 `build_tools` 肚子里？（闭包）
 
 知识检索需要外层传进来的 `knowledge`。内层函数能记住这个对象，这就叫**闭包**：工具出厂时已经知道该去哪个知识库找资料，模型只填写 `query`。
 
-计算器和时间工具不需要知识库，但仍放在同一个工厂函数里，方便对照三个工具怎样注册。
+计算器和时间工具不需要知识库，但仍放在同一个工厂函数里，方便对照四个工具怎样注册。
 
 聊天记录和共享画像由 `agent.py` 在每轮开始时读取，不通过工具查询。
 
@@ -148,9 +149,20 @@ return knowledge.context(query)
 
 背景知识：每轮问答 `agent.py` 会**直接调用 `knowledge.context()` 自动检索一次**（轨迹里仍用 `knowledge_search` 标记，并带 `trigger: automatic`），这件工具的存在是给模型**补查**用的——自动检索那批资料不够时，模型可以换个关键词再捞一轮。docstring 里那句"资料不足时可换关键词补充"就是专门写给模型看的 Usage 指南。
 
+## 6. `delete_knowledge()`：删知识文档，但要人批准
 
+```python
+@tool
+def delete_knowledge(source: str) -> str:
+    """删除一份知识文档；需要人工批准。source 用来源名，如 course.md 或 uploads/notes.txt。"""
+    return knowledge.delete(source)
+```
 
-## 6. 走一遍："现在几点？顺便算下 2 月的天数除法 28/7"
+它只把来源名转交给 `rag.py` 的 `KnowledgeBase.delete()`；真正删原件、同步索引在那边。
+
+**审批不是这个工具自己做的**。`agent.py` 给 Agent 挂了 `HumanInTheLoopMiddleware`：模型一请求 `delete_knowledge`，图就暂停，网页弹出批准/拒绝；批准后工具才执行。权限表、钩子和恢复流程见 [tool_policy.md](D:/study/AI/ai-agent-demo-study/docs/code-guide/tool_policy.md)。
+
+## 7. 走一遍："现在几点？顺便算下 2 月的天数除法 28/7"
 
 | 步 | 发生什么 |
 | --- | --- |
@@ -161,10 +173,11 @@ return knowledge.context(query)
 
 一轮调几个工具、先调哪个，全是模型自己临场决定的——这就是"Agent"和"固定脚本"的区别。
 
-## 本篇要带走的三句话
+## 本篇要带走的四句话
 
 1. 模型只会递单子，真正干活的是这里的 Python 函数；
 2. 知识检索工具记住外层的知识库对象，模型只需填写检索词；
 3. calculator 的"先拆结构、过白名单、再断电执行"是处理一切"用户输入的代码"的通用安全模板，值得抄。
+4. 删除这类破坏性工具只负责干活，审批由 `tool_policy.py` 的 HITL 中间件在更外层负责。
 
 继续读：[documents.py：仓库前台——收件、验货、抠文字](D:/study/AI/ai-agent-demo-study/docs/code-guide/documents.md)。

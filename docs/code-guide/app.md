@@ -14,8 +14,9 @@
 | --- | --- | --- |
 | 公共函数 | `get_app()`、`show_error()` | 取得缓存的 Agent，统一显示错误 |
 | 操作处理 | `new_session()`、`switch_session()` | 修改会话状态，准备提示 |
-| 操作处理 | `handle_upload()`、`handle_sync()`、`handle_question()` | 执行上传、同步或一轮问答 |
-| 页面绘制 | `render_usage()`、`render_profile()`、`render_sidebar()`、`render_chat()` | 显示用量和画像、画控件，返回本轮用户的操作 |
+| 操作处理 | `handle_upload()`、`handle_sync()`、`handle_question()`、`resume_question()` | 执行上传、同步、一轮问答或审批后的继续 |
+| 公共函数 | `handle_chat_result()` | 根据本轮结果统一准备成功/警告提示并重跑 |
+| 页面绘制 | `render_usage()`、`render_profile()`、`render_sidebar()`、`render_chat()`、`render_approval()` | 显示用量、画像和审批卡片，画控件，返回本轮用户的操作 |
 | 主流程 | `main()` | 先准备应用，再画页面、处理操作、显示提示 |
 
 现在侧边栏的默认样子是：
@@ -94,10 +95,13 @@ def main() -> None:
     # 3. 绘制侧栏，再处理上传或同步；操作结果也显示在侧栏。
     with st.sidebar:
         files, upload_clicked, sync_clicked = render_sidebar(app)
-        if upload_clicked:
-            handle_upload(app, files)
-        if sync_clicked:
-            handle_sync(app)
+        try:
+            if upload_clicked:
+                handle_upload(app, files)
+            if sync_clicked:
+                handle_sync(app)
+        except Exception as error:
+            show_error(error)
 
     # 4. 先显示历史问答，再处理新问题。
     try:
@@ -148,17 +152,20 @@ st.session_state["sid"]
 ```python
 with st.sidebar:
     files, upload_clicked, sync_clicked = render_sidebar(app)
-    if upload_clicked:
-        handle_upload(app, files)
-    if sync_clicked:
-        handle_sync(app)
+    try:
+        if upload_clicked:
+            handle_upload(app, files)
+        if sync_clicked:
+            handle_sync(app)
+    except Exception as error:
+        show_error(error)
 ```
 
 `with st.sidebar:` 指定这一块中的页面内容画在侧边栏。函数调用也在这块里执行，所以函数里面的按钮、加载动画、成功提示和错误提示都会放在侧边栏。
 
 `render_sidebar()` 一次返回三个值，左边三个变量按顺序接住。这叫“解包”：文件列表交给 `files`，上传按钮状态交给 `upload_clicked`，同步按钮状态交给 `sync_clicked`。
 
-绘制函数负责报告用户点了什么；`main()` 根据两个布尔值决定是否调用操作处理函数。只是选中文件，还不会入库，必须再点“上传并入库”。
+绘制函数负责报告用户点了什么；`main()` 根据两个布尔值决定是否调用操作处理函数。只是选中文件，还不会入库，必须再点“上传并入库”。上传和同步共用一个 `try`：失败时在侧栏显示错误，页面继续画聊天区。
 
 ### 第四步：画聊天，再处理新问题
 
@@ -293,7 +300,7 @@ st.success(f"已入库 {len(result['files'])} 份文档，知识库共 {result['
 
 `with st.spinner(...)` 表示执行块内代码时显示加载动画，结束后消失。`len(result['files'])` 数上传成功的文件；`result['chunks']` 是全部切片数，不是本次新增数量。
 
-这段有自己的 `try / except`。上传失败时显示原因，之后 `main()` 仍会继续画主聊天区。
+上传和同步不再各自写 `try / except`；`main()` 在侧栏入口统一包一次，失败时 `show_error()`，之后仍继续画主聊天区。这样两个操作函数只负责“成功做什么”。
 
 ### handle_sync(app)：重新扫描已有原件
 
@@ -307,7 +314,7 @@ st.success(f"知识库已同步：{count} 个切片")
 
 适用于直接修改了预置文档或已上传原件的情况。后台重新读取、切片和比对指纹，只向量化新增内容，再清理已不存在的切片。这里返回的也是总数。
 
-同步失败同样交给 `show_error()`，这次操作结束后继续画主区域。
+同步失败同样由 `main()` 侧栏入口的 `try / except` 捕获并交给 `show_error()`，这次操作结束后继续画主区域。
 
 ## 7. handle_question(app, question)：调用一轮 Agent
 
@@ -321,21 +328,39 @@ with st.spinner("Agent 正在调用模型与工具…"):
 
 先清空上次的成功提示，再调用 Agent。否则这次失败了，页面上可能还留着上次的“已保存”，让人误以为这次也保存成功。
 
-`app.chat()` 接收当前会话号和原问题，完成检索、模型与工具循环、可选答案检查、记忆提取和保存。返回字典中的 `memory_warning` 决定提示颜色：
+`app.chat()` 接收当前会话号和原问题，完成检索、模型与工具循环、可选答案检查、记忆提取和保存。如果模型请求了需要审批的工具，`chat()` 返回 `status="pending_approval"`，先存进 `session_state`，页面重跑后显示审批卡片：
+
+```python
+if result.get("status") == "pending_approval":
+    st.session_state.pending_approval = result
+    st.session_state.session_notice = ("warning", "等待人工审批：请先批准或拒绝待执行的操作。")
+    st.rerun()
+
+handle_chat_result(result)
+```
+
+`handle_chat_result()` 把成功/警告提示和重跑收在一处，`handle_question()` 与 `resume_question()` 共用：
 
 ```python
 if result.get("memory_warning"):
-    st.session_state.session_notice = (
-        "warning", "本轮问答已自动保存到 MySQL。" + result["memory_warning"]
-    )
+    st.session_state.session_notice = ("warning", "本轮问答已自动保存到 MySQL。" + result["memory_warning"])
 else:
-    st.session_state.session_notice = (
-        "success", "本轮问答已自动保存到 MySQL，结构化记忆已检查更新。"
-    )
+    st.session_state.session_notice = ("success", "本轮问答已自动保存到 MySQL，结构化记忆已检查更新。")
 st.rerun()
 ```
 
-有警告表示问答已保存，但画像更新出了问题，例如提取失败或容量超限。没有警告就准备成功提示。`+` 把两段文字接起来；`.get()` 在键缺失时返回 `None`，空字符串和 `None` 都会让 `if` 不成立。
+有警告表示问答已保存，但画像更新出了问题，例如提取失败或容量超限。没有警告就准备成功提示。
+
+### 7.1 审批：resume_question() 和 render_approval()
+
+`render_approval()` 显示待审批的工具名、参数和说明，并画“批准执行 / 拒绝”两个按钮。点按钮后 `resume_question()` 调：
+
+```python
+result = app.resume(pending["session_id"], {"type": "approve"})
+# 或 {"type": "reject", "message": "用户拒绝"}
+```
+
+`app.resume()` 用同一个 `thread_id` 从暂停处继续；完成后清空 `pending_approval`，再走 `handle_chat_result()`。如果恢复后又出现新的待审批动作，就更新卡片继续显示。审批期间 `render_chat()` 不画聊天输入框，避免重复提问。
 
 最后为什么重跑？因为当前页面的历史区是在调用 Agent **之前**画的，还没有这轮新答案。`st.rerun()` 立刻结束当前运行，再从头执行脚本，`render_chat()` 重新查 MySQL，就能画出新问答。
 
@@ -433,7 +458,7 @@ with st.expander("知识库管理", expanded=False):
 
 函数最后返回三个值。它没有在画上传、同步按钮时执行后台操作，处理入口在 `main()` 的两个 `if` 中，一眼就能找到。
 
-## 9. render_chat(app)：显示历史，交回新问题
+## 9. render_chat(app)：显示历史与审批卡片，交回新问题
 
 接收 `app`，返回 `str | None`。竖线表示“可能是字符串，也可能是 `None`”。按页面从上往下看：会话说明、画像、历史问答与本轮用量、当前用户累计、输入框。
 
@@ -510,15 +535,22 @@ render_usage(total, prefix="累计")
 
 刷新页面不会重新累加；新会话从零开始；切回旧会话就恢复它的累计。没有统计显示“未记录”，接口缺少字段显示“未提供”。累计比例依然用累计缓存数除累计输入数、累计推理数除累计输出数，不平均百分比。
 
-耗时显示 `chat_seconds`，名称是“处理耗时”：从进入 `chat()` 到保存前，包括检索、工具、反思、记忆提取和摘要，不包含最后保存和网页绘制。token 不包含 Embedding 或未保存的失败问答。
+耗时显示 `chat_seconds`，名称是“处理耗时”：从进入 `chat()` 到保存前，包括检索、工具、反思、记忆提取和摘要；人工审批等待不计入，恢复后的第二次模型调用仍计入同一轮，不包含最后保存和网页绘制。token 不包含 Embedding 或未保存的失败问答。
 
-### 输入框
+### 输入框与审批卡片
 
 ```python
+pending = st.session_state.get("pending_approval")
+if pending and pending.get("session_id") == st.session_state.sid:
+    render_approval(app, pending)
+    return None
+
 return st.chat_input("输入问题")
 ```
 
-在这里创建的聊天输入框固定在主页面底部。未提交返回 `None`，提交后返回文字，直接交回 `main()`。所以绘制函数到这里结束，调用 Agent 的细节在 `handle_question()` 中。
+正常情况下创建聊天输入框，固定在主页面底部。未提交返回 `None`，提交后返回文字，直接交回 `main()`。
+
+如果当前会话有待审批操作，就先画审批卡片并返回 `None`，**不画输入框**；等批准/拒绝并完成本轮后，输入框才回来。这样避免审批期间又提交一个新问题。其他会话的待审批不会影响当前会话。
 
 ## 10. 把一次提问从头走完
 

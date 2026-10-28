@@ -55,6 +55,17 @@ def handle_sync(app: AgentApp) -> None:
     st.success(f"知识库已同步：{count} 个切片")
 
 
+def handle_chat_result(result: dict) -> None:
+    """根据本轮结果准备提示并重跑页面。"""
+    if result.get("memory_warning"):
+        st.session_state.session_notice = (
+            "warning", "本轮问答已自动保存到 MySQL。" + (result.get("memory_warning") or "结构化记忆已检查更新。")
+        )
+    else:
+        st.session_state.session_notice = ("success", "本轮问答已自动保存到 MySQL，结构化记忆已检查更新。")
+    st.rerun()
+
+
 def handle_question(app: AgentApp, question: str) -> None:
     """调用 Agent 回答问题，准备结果提示，再重画最新聊天。"""
     # 先清掉上次提示，避免本轮失败时仍显示上轮的“已保存”。
@@ -62,16 +73,43 @@ def handle_question(app: AgentApp, question: str) -> None:
     with st.spinner("Agent 正在调用模型与工具…"):
         result = app.chat(st.session_state.sid, question)
 
-    # 画像更新失败时问答仍已保存，因此显示警告而不是整轮失败。
-    if result.get("memory_warning"):
-        st.session_state.session_notice = (
-            "warning", "本轮问答已自动保存到 MySQL。" + (result.get("memory_warning") or "结构化记忆已检查更新。")
-        )
-    else:
-        st.session_state.session_notice = ("success", "本轮问答已自动保存到 MySQL，结构化记忆已检查更新。")
+    if result.get("status") == "pending_approval":
+        st.session_state.pending_approval = result
+        st.session_state.session_notice = ("warning", "等待人工审批：请先批准或拒绝待执行的操作。")
+        st.rerun()
 
-    # 当前页面是在调用 Agent 之前画的，重跑后从 MySQL 读取最新问答。
-    st.rerun()
+    handle_chat_result(result)
+
+
+def resume_question(app: AgentApp, pending: dict, decision: dict) -> None:
+    """批准或拒绝待审批操作，并继续本轮。"""
+    try:
+        with st.spinner("Agent 正在继续…"):
+            result = app.resume(pending["session_id"], decision)
+    except Exception as error:
+        show_error(error)
+        st.session_state.pending_approval = None
+        return
+
+    if result.get("status") == "pending_approval":
+        st.session_state.pending_approval = result
+        st.rerun()
+
+    st.session_state.pending_approval = None
+    handle_chat_result(result)
+
+
+def render_approval(app: AgentApp, pending: dict) -> None:
+    """显示待审批的工具调用，批准或拒绝后继续本轮。"""
+    st.warning("以下工具调用需要人工审批，执行前不会修改任何数据。")
+    st.json(pending["actions"])
+    approve, reject = st.columns(2)
+    approve_clicked = approve.button("批准执行", type="primary", width="stretch")
+    reject_clicked = reject.button("拒绝", width="stretch")
+    if approve_clicked:
+        resume_question(app, pending, {"type": "approve"})
+    elif reject_clicked:
+        resume_question(app, pending, {"type": "reject", "message": "用户拒绝"})
 
 
 def render_usage(stats: dict | None, prefix: str = "本轮") -> None:
@@ -230,6 +268,11 @@ def render_chat(app: AgentApp) -> str | None:
         "包括自动摘要，不含 Embedding 和未保存的失败问答。"
     )
     st.caption("缓存 token 仍计入输入；处理耗时从进入 chat() 到保存前，包含检索、工具、反思、记忆提取和自动摘要。")
+
+    pending = st.session_state.get("pending_approval")
+    if pending and pending.get("session_id") == st.session_state.sid:
+        render_approval(app, pending)
+        return None
 
     return st.chat_input("输入问题")
 

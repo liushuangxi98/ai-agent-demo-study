@@ -163,6 +163,8 @@ def test_chat_checks_complete_materials_and_saves_only_selected_answer(monkeypat
     app = AgentApp.__new__(AgentApp)
     app.settings = replace(settings, reflection_enabled=enabled)
     app.llm = Mock()
+    app.pending = {}
+    app.checkpointer = Mock()
     app.llm.with_structured_output.return_value.invoke.return_value = {
         "raw": AIMessage(content=""), "parsed": wrong_number(), "parsing_error": None,
     }

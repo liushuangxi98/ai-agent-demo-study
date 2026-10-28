@@ -12,15 +12,19 @@
 | --- | --- |
 | `SYSTEM_PROMPT` | 给模型的岗位说明书 |
 | `AgentApp.__init__()` | 开门前把团队集结齐 |
-| `AgentApp.chat()` | 一轮问答的完整指挥流程（**全文精华**）|
+| `AgentApp.chat()` | 一轮问答的完整指挥流程（含审批暂停）|
+| `AgentApp.resume()` | 人工批准/拒绝后，从暂停处继续本轮 |
+| `AgentApp._finish_turn()` | `chat()` 和 `resume()` 共用的收尾：轨迹、反思、画像、摘要、用量、保存 |
 | `collect_trace()` | 整理工具请求与返回结果 |
 
-`AgentApp` 对象身上挂四件家当：`settings` 配置袋、`llm` 电话机、`memory` 档案室、`knowledge` 图书馆。
+`AgentApp` 对象身上挂六件家当：`settings` 配置袋、`llm` 电话机、`memory` 档案室、`knowledge` 图书馆、`checkpointer` 审批存档、`pending` 待审批现场。
 
 ## 1. `__init__()`：开门前把团队集结齐
 
 ```python
 self.settings = settings                # 创建 Settings 时已自动检查，这里保存下来
+self.checkpointer = InMemorySaver()      # 审批暂停时保存图状态
+self.pending = {}                        # 每个会话的待审批现场
 self.llm = build_llm(settings)           # 造电话（不拨号）
 self.memory = ConversationMemory(settings)   # 开档案室（真连 MySQL，建库建表）
 try:
@@ -47,6 +51,7 @@ except Exception:
 | --- | --- |
 | 优先用附带资料，用 `[文件名#切片号]` 引用 | 答案可对照原文，防瞎编 |
 | 资料不够可换词补查 knowledge_search | 给模型自救通道 |
+| 删除知识文档只在用户明确要求时调用 delete_knowledge，且需要人工批准 | 破坏性操作不主动做，最终由人点头 |
 | 数学用 calculator，需要当前日期或时间时用 current_time | 别让模型心算，也别把旧聊天的时间当成现在 |
 | 本轮更正 > 最新画像 > 旧会话历史 | 冲突事实的**优先级链**：越新越可信 |
 | 已遗忘/已过期不许从旧上下文恢复 | `chat()` 整理画像时藏掉失效旧值、保留状态 |
@@ -85,12 +90,16 @@ evidence = self.knowledge.context(question)  # 程序保底检索一次，模型
 
 ### 第三步：运行模型与工具循环，验收草稿
 
-`create_agent()` 管工具循环，步数上限仍为 12。工具轨迹按调用 ID 配对，程序自动检索另标 `trigger: automatic`。
+`create_agent()` 管工具循环，步数上限仍为 12。工具轨迹按调用 ID 配对，程序自动检索另标 `trigger: automatic`。创建 Agent 时还传入 `tool_policy.build_tool_middleware()` 和 `InMemorySaver`：前者做白名单/次数/审批，后者保存暂停现场。同一轮 `resume()` 复用 `chat()` 建好的图，工具计数跨暂停保留；下一轮 `chat()` 再新建。
 
 ```python
 new_messages = result["messages"][len(input_messages):]  # 切掉摘要、画像、旧问答与本轮输入，只保留新增消息。
 model_messages = [message for message in new_messages if isinstance(message, AIMessage)]  # 所有本轮主模型返回都要统计。
 ```
+
+**如果模型请求的是 `delete_knowledge`**，`HumanInTheLoopMiddleware` 会在工具执行前中断，`invoke()` 返回 `__interrupt__`。这时 `chat()` 不验收、不提取、不保存，只把上下文存进 `self.pending[session_id]`，返回 `status="pending_approval"`。网页批准或拒绝后，`resume()` 用同一个 `thread_id` 继续；`_finish_turn()` 再走下面同样的收尾。
+
+所以一轮可能调用两次模型：第一次提出工具调用，人工批准后工具执行，第二次模型消化工具结果。审批只是插入暂停，不是两次独立对话。
 
 最后一条必须是非空、无待执行工具请求的 AIMessage；空结果也明确报错。最终回答不合格时不提取、不摘要、不保存。
 
@@ -118,7 +127,7 @@ compress_count = max(0, len(turns) + 1 - self.settings.summary_keep_turns)  # �
 
 ### 第六步：统一统计并短事务保存
 
-摘要返回的原始消息追加到 `model_messages`，与问答、反思、画像提取一起交给 `summarize_usage()`。已返回但校验失败的摘要用量仍计入；请求失败没有消息时保留未知。
+`chat()` 和 `resume()` 都交给 `_finish_turn()` 收尾。摘要返回的原始消息追加到 `model_messages`，与问答、反思、画像提取一起交给 `summarize_usage()`。已返回但校验失败的摘要用量仍计入；请求失败没有消息时保留未知。
 
 ```python
 self.memory.save_turn(session_id, question, answer, trace, changes, now, usage=usage, summary=summary_state or None)  # 一次保存本轮全部状态。
@@ -140,6 +149,9 @@ self.memory.save_turn(session_id, question, answer, trace, changes, now, usage=u
 | 检索或模型问答失败 | 什么都不保存（异常抛给网页显示）|
 | 最终回答不合格 | 报错，不提取不保存 |
 | 可选检查或修订失败 | 保留草稿、记录失败状态；继续尝试保存问答，网页可展开查看 |
+| 审批被拒绝 | 不执行删除工具；模型收到拒绝，本轮正常保存 |
+| 待审批时又问新问题 | 报“请先批准或拒绝当前操作” |
+| 程序重启时仍在待审批 | 内存 checkpointer 和 pending 丢失，重新提问即可 |
 | 记忆提取失败 | **问答照存**，画像不动 + 警告 |
 | 摘要失败、空结果或服务端截断 | 保留旧摘要与旧游标，未压缩原文仍在；问答继续保存，已返回用量仍计入 |
 | 画像超容量 | 回滚后重存"纯问答" + 警告 |

@@ -103,7 +103,7 @@ if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", session_id):
 return session_id
 ```
 
-和 config.py 查 USER_ID 同一招：先卡格式，后面每个用它的地方都能偷懒。只查**格式**，不查"这会话在库里存不存在"（网页加载旧会话时会另外查有没有聊天）。
+和 config.py 查 USER_ID 同一招：先卡格式，后面的方法就能少写重复检查。现在 `chat()` / `resume()` 在入口校验一次，`recent()` 直接服务网页也保留；`save_turn()` / `context()` 只由已校验的入口调用，不再重复校验。它只查**格式**，不查"这会话在库里存不存在"（网页加载旧会话时会另外查有没有聊天）。
 
 ## 5. `ConversationMemory.__init__()`：开档案室（五步，步步有讲究）
 
@@ -308,11 +308,11 @@ turns, previous_usage, summary_state = self.memory.context(session_id)  # 三项
 | `previous_usage` | 最后一轮 `usage_json.total` | 现有用量统计 |
 | `summary_state` | `{text, through_turn_id}`；未摘要为 `{}` | Agent 组装摘要资料消息与继续压缩 |
 
-读取顺序：先按 `user_id + session_id` 找最后一行，再取它的累计和摘要。没有记录返回 `([], {}, {})`；没有摘要从 ID 0 开始，即读取本会话全部原文。
+读取顺序：先按 `user_id + session_id` 找最后一行，再取它的累计和摘要。会话 ID 由 Agent 入口校验，这里直接查询；没有记录返回 `([], {}, {})`，没有摘要从 ID 0 开始，即读取本会话全部原文。
 
 有摘要时，查询 `id > through_turn_id` 且 `id <= latest.id` 的全部记录，按 ID 正序返回。上下界与本次快照保持一致，页面 `recent()` 的 50 条限制不参与这里的读取。数据库 ID 是全表编号，跨会话可能不连续，不能用轮数代替。
 
-摘要正文和游标都要有效；损坏快照会明确报错，避免悄悄跳过历史。返回普通字典后，Session 随 `with` 结束关闭，模型请求不会占着数据库事务。
+摘要正文和游标合并成一次有效性检查；损坏快照会明确报错，避免悄悄跳过历史。返回普通字典后，Session 随 `with` 结束关闭，模型请求不会占着数据库事务。
 
 ### 摘要如何随问答保存
 

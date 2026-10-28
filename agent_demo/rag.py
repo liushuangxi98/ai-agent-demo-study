@@ -4,8 +4,10 @@
 """
 
 import hashlib
+import logging
 import os
 import threading
+from pathlib import Path
 from typing import Any
 
 from chromadb.config import Settings as ChromaSettings
@@ -16,6 +18,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from agent_demo.config import Settings
 from agent_demo.documents import load_documents, save_uploads
 from agent_demo.embeddings import build_embeddings
+
+logger = logging.getLogger(__name__)
 
 CHUNK_SIZE = 400
 CHUNK_OVERLAP = 60
@@ -77,7 +81,7 @@ class KnowledgeBase:
                 ids.append(hashlib.sha256(identity.encode()).hexdigest())
 
         if not chunks:
-            raise ValueError("知识目录和上传目录中没有可入库的文档")
+            return [], []
         return chunks, ids
 
     def ingest(self) -> int:
@@ -85,6 +89,12 @@ class KnowledgeBase:
         with self.lock:
             chunks, ids = self._prepare_chunks()
             old_ids = set(self.store.get()["ids"])
+
+            # 目录里一份文档都没有时，清空旧索引；空库是允许的状态。
+            if not chunks:
+                if old_ids:
+                    self.store.delete(ids=list(old_ids))
+                return 0
 
             new_chunks, new_ids = [], []
             for chunk, chunk_id in zip(chunks, ids):
@@ -109,11 +119,46 @@ class KnowledgeBase:
             count = self.ingest()
         return {"files": names, "chunks": count}
 
+    def is_empty(self) -> bool:
+        """无额外参数；知识库没有任何切片时返回 True。"""
+        with self.lock:
+            return not self.store.get(limit=1)["ids"]
+
+    def delete(self, source: str) -> str:
+        """参数：知识来源名；删除原件并同步索引，返回结果文字。"""
+        with self.lock:
+            raw = source.strip()
+            if not raw or Path(raw).is_absolute() or ".." in Path(raw).parts:
+                return "source 必须是知识文档来源名，例如 course.md 或 uploads/notes.txt"
+            if raw.startswith("uploads/"):
+                root, relative = self.uploads_dir, raw.removeprefix("uploads/")
+            else:
+                root, relative = self.settings.docs_dir, raw
+
+            target = (root / relative).resolve()
+            if root.resolve() not in target.parents:
+                return "source 必须位于知识目录内"
+            if not target.is_file():
+                return f"未找到知识文档：{raw}"
+
+            try:
+                target.unlink()
+            except OSError as error:
+                return f"删除失败：{error}"
+
+            try:
+                count = self.ingest()
+            except Exception as error:
+                logger.exception("删除后同步知识库失败：%s", raw)
+                return f"文件已删除，但知识库同步失败：{type(error).__name__}"
+
+        return f"已删除 {raw}，知识库现有 {count} 个切片。" if count else f"已删除 {raw}，知识库已清空。"
+
     def retrieve(self, query: str) -> list[dict[str, Any]]:
         """参数：问题或检索词；返回命中列表，每项含 source、chunk、distance、text。"""
+        if self.is_empty():
+            return []
         with self.lock:
-            if not self.store.get(limit=1)["ids"]:
-                raise ValueError("知识库为空，请点击侧栏的“同步知识库”")
             matches = self.store.similarity_search_with_score(query, k=self.settings.rag_top_k)
 
         hits = []
@@ -129,7 +174,9 @@ class KnowledgeBase:
         return hits
 
     def context(self, query: str) -> str:
-        """参数：检索问题；返回带来源的证据，未命中时返回一句提示。"""
+        """参数：检索问题；返回带来源的证据，未命中或空库时返回一句提示。"""
+        if self.is_empty():
+            return "知识库为空，请先上传或同步文档。"
         hits = self.retrieve(query)
         if not hits:
             # 未命中不抛错：模型仍可回答常识或使用其他工具。

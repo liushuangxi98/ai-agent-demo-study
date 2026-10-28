@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # 固定直接依赖，避免教学示例随上游接口变动；Python 3.11～3.13。
 langchain==1.4.4
+langgraph==1.2.14
 langchain-openai==1.7.0
 langchain-chroma==1.1.0
 langchain-text-splitters==1.1.3

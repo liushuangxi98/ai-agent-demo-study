@@ -39,35 +39,37 @@ app.py 网页收到问题
 | 1 | [__init__.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/__init__.md) | 工具箱封条 | `from agent_demo...` 凭什么找得到代码？ |
 | 2 | [config.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/config.md) | 传达室大爷 | 密钥、数据库地址、"历史看几轮"从哪来？ |
 | 3 | [llm.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/llm.md) | 装好密钥的电话机 | "造客户端"和"真提问"差在哪？ |
-| 4 | [tools.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/tools.md) | 三件工具的工具箱 | 模型怎么让本地 Python 帮它干活？计算器为什么不敢直接 eval？ |
-| 5 | [documents.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/documents.md) | 仓库前台 | PDF/Word/TXT 怎么汇成同一条入库路线？ |
-| 6 | [embeddings.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/embeddings.md) | 发数字名片的翻译官 | 换个说法，为什么还能找到同一段资料？ |
-| 7 | [rag.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/rag.md) | 图书馆管理员 | 文档怎么切片、重启为什么不重复花钱向量化？ |
-| 8 | [memory.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/memory.md) | 档案室管理员 | 聊天和画像怎么进 MySQL？"同一事务保两货"怎么回事？ |
-| 9 | [structured_memory.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/structured_memory.md) | 档案卡书记员 | 姓名怎么被提取、更正、遗忘、过期？ |
-| 10 | [reflection.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/reflection.md) | 交卷前的检查员 | 怎样对照材料检查草稿，有问题才改一次？ |
-| 11 | [usage.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/usage.md) | 模型调用记账员 | token、缓存、推理占比和耗时怎么按轮汇总？ |
-| 12 | [agent.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/agent.md) | 总指挥 | 前面所有东西怎么串成一轮问答？ |
-| 13 | [logging_config.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/logging_config.md) | 故障记录本 | 完整报错怎样落盘，日志文件为什么不会一直长大？ |
+| 4 | [tools.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/tools.md) | 四件工具的工具箱 | 模型怎么让本地 Python 帮它干活？计算器为什么不敢直接 eval？ |
+| 5 | [tool_policy.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/tool_policy.md) | 工具门卫与审批员 | 工具怎么被允许、限次、暂停等人工批准？ |
+| 6 | [documents.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/documents.md) | 仓库前台 | PDF/Word/TXT 怎么汇成同一条入库路线？ |
+| 7 | [embeddings.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/embeddings.md) | 发数字名片的翻译官 | 换个说法，为什么还能找到同一段资料？ |
+| 8 | [rag.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/rag.md) | 图书馆管理员 | 文档怎么切片、重启为什么不重复花钱向量化？ |
+| 9 | [memory.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/memory.md) | 档案室管理员 | 聊天和画像怎么进 MySQL？"同一事务保两货"怎么回事？ |
+| 10 | [structured_memory.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/structured_memory.md) | 档案卡书记员 | 姓名怎么被提取、更正、遗忘、过期？ |
+| 11 | [reflection.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/reflection.md) | 交卷前的检查员 | 怎样对照材料检查草稿，有问题才改一次？ |
+| 12 | [usage.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/usage.md) | 模型调用记账员 | token、缓存、推理占比和耗时怎么按轮汇总？ |
+| 13 | [agent.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/agent.md) | 总指挥 | 前面所有东西怎么串成一轮问答？ |
+| 14 | [logging_config.py](D:/study/AI/ai-agent-demo-study/docs/code-guide/logging_config.md) | 故障记录本 | 完整报错怎样落盘，日志文件为什么不会一直长大？ |
 
-已经懂个大概的，可以先读 agent.py 的十步流程，再按它调用的函数跳到对应篇，不必死守顺序。
+已经懂个大概的，可以先读 agent.py 的主流程，再按它调用的函数跳到对应篇，不必死守顺序。
 
 ## 3. 按函数名快速定位
 
 | 源码文件 | 各篇讲哪些入口 |
 | --- | --- |
-| [app.py](D:/study/AI/ai-agent-demo-study/app.py) | `main()` 串起页面；`get_app()` / `show_error()` 负责公共工作；`new_session()` / `switch_session()` 是会话回调；`handle_upload()` / `handle_sync()` / `handle_question()` 处理操作；`render_usage()` / `render_profile()` / `render_sidebar()` / `render_chat()` 绘制页面 |
+| [app.py](D:/study/AI/ai-agent-demo-study/app.py) | `main()` 串起页面；`get_app()` / `show_error()` 负责公共工作；`new_session()` / `switch_session()` 是会话回调；`handle_upload()` / `handle_sync()` / `handle_question()` / `resume_question()` 处理操作；`handle_chat_result()` 统一提示；`render_usage()` / `render_profile()` / `render_sidebar()` / `render_chat()` / `render_approval()` 绘制页面 |
 | [__init__.py](D:/study/AI/ai-agent-demo-study/agent_demo/__init__.py) | 无函数；讲包和导入 |
 | [config.py](D:/study/AI/ai-agent-demo-study/agent_demo/config.py) | `ROOT`、`Settings`、`__post_init__()`、`validate()`、`load_settings()` |
 | [llm.py](D:/study/AI/ai-agent-demo-study/agent_demo/llm.py) | `build_llm()` |
-| [tools.py](D:/study/AI/ai-agent-demo-study/agent_demo/tools.py) | `build_tools()`、`calculator`、`current_time`、`knowledge_search` |
+| [tools.py](D:/study/AI/ai-agent-demo-study/agent_demo/tools.py) | `build_tools()`、`calculator`、`current_time`、`knowledge_search`、`delete_knowledge` |
+| [tool_policy.py](D:/study/AI/ai-agent-demo-study/agent_demo/tool_policy.py) | `TOOL_POLICIES`、`build_tool_guard()`、`build_tool_middleware()` |
 | [documents.py](D:/study/AI/ai-agent-demo-study/agent_demo/documents.py) | `_read_pdf()`、`_read_docx()`、`extract_text()`、`save_uploads()`、`load_documents()` |
 | [embeddings.py](D:/study/AI/ai-agent-demo-study/agent_demo/embeddings.py) | `build_embeddings()` |
-| [rag.py](D:/study/AI/ai-agent-demo-study/agent_demo/rag.py) | `KnowledgeBase` 的 `__init__()`、`_prepare_chunks()`、`ingest()`、`upload()`、`retrieve()`、`context()` |
+| [rag.py](D:/study/AI/ai-agent-demo-study/agent_demo/rag.py) | `KnowledgeBase` 的 `__init__()`、`_prepare_chunks()`、`ingest()`、`upload()`、`delete()`、`retrieve()`、`context()` |
 | [memory.py](D:/study/AI/ai-agent-demo-study/agent_demo/memory.py) | `Base`、`ConversationTurn`、`UserMemory`、`to_dict()`、`validate_session_id()`；`ConversationMemory` 的开室、取卡、存单、并发改卡、近期记录、会话目录、上下文装箱、收线 |
 | [structured_memory.py](D:/study/AI/ai-agent-demo-study/agent_demo/structured_memory.py) | `FactChange`、`MemoryPatch`、`extract_changes()`、`merge_profile()`、`fact_status()` |
 | [reflection.py](D:/study/AI/ai-agent-demo-study/agent_demo/reflection.py) | `ReviewIssue`、`ReviewResult`、两段提示词、`_unknown_citations()`、`reflect_answer()`、`SUMMARY_PROMPT`、`summarize_history()` |
-| [agent.py](D:/study/AI/ai-agent-demo-study/agent_demo/agent.py) | `SYSTEM_PROMPT`、`collect_trace()`、`AgentApp` 的 `__init__()`、`chat()` |
+| [agent.py](D:/study/AI/ai-agent-demo-study/agent_demo/agent.py) | `SYSTEM_PROMPT`、`collect_trace()`、`AgentApp` 的 `__init__()`、`chat()`、`resume()`、`_finish_turn()` |
 | [usage.py](D:/study/AI/ai-agent-demo-study/agent_demo/usage.py) | `summarize_usage()`：直接读取返回值，生成本轮与会话累计 |
 | [logging_config.py](D:/study/AI/ai-agent-demo-study/agent_demo/logging_config.py) | `LOG_FILE`、`setup_logging()`：日志文件、控制台、轮转与异常堆栈 |
 
@@ -124,7 +126,8 @@ flowchart TD
     WEB --> AGENT["agent.py 总指挥"]
     CFG --> AGENT
     AGENT --> LLM["llm.py 电话机"]
-    AGENT --> TOOL["tools.py 工具箱"]
+    AGENT --> POLICY["tool_policy.py 权限/审批"]
+    POLICY --> TOOL["tools.py 工具箱"]
     TOOL --> RAG["rag.py 图书馆"]
     RAG --> DOC["documents.py 前台"]
     RAG --> EMB["embeddings.py 名片机"]
@@ -170,6 +173,6 @@ flowchart TD
 
 不会。入库只扫预置目录和上传目录，不碰 `docs/code-guide`。
 
-顺带提醒：知识库里上传的多 Agent、反思、Harness 等文章是**学习资料**——文章讲的能力，不代表本项目全部实现了。当前代码是“三工具 + RAG + 个人记忆 + 可选的一次检查/重写”的本机教学示例；另有当前会话累计摘要，主问答总 token 超过 50000 时按需生成；没有跨任务反思经验库或多 Agent 编排。
+顺带提醒：知识库里上传的多 Agent、反思、Harness 等文章是**学习资料**——文章讲的能力，不代表本项目全部实现了。当前代码是“四工具 + 人工审批 + RAG + 个人记忆 + 可选的一次检查/重写”的本机教学示例；另有当前会话累计摘要，主问答总 token 超过 50000 时按需生成；没有跨任务反思经验库或多 Agent 编排。
 
 准备好了就从 [__init__.py：工具箱封条](D:/study/AI/ai-agent-demo-study/docs/code-guide/__init__.md) 顺着读；想先看全局，直接开 [agent.py：总指挥](D:/study/AI/ai-agent-demo-study/docs/code-guide/agent.md)。

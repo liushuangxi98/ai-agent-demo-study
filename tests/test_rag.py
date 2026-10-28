@@ -42,6 +42,7 @@ def test_windows_chroma_uses_local_temp_and_works_without_network(tmp_path, monk
 def test_context_formats_sources_without_changing_the_evidence():
     """合并排版方法后，来源编号、换行和片段顺序仍然一致。"""
     knowledge = KnowledgeBase.__new__(KnowledgeBase)
+    knowledge.is_empty = Mock(return_value=False)
     knowledge.retrieve = Mock(return_value=[
         {"source": "course.md", "chunk": 0, "text": "课程说明。"},
         {"source": "uploads/notes.txt", "chunk": 2, "text": "上传资料。"},
@@ -121,3 +122,78 @@ def test_concurrent_sync_does_not_restore_an_older_file_snapshot():
     assert not errors
     assert second_prepared.is_set()
     assert stored_ids == {"new"}
+
+
+def test_ingest_empty_directories_clears_index_and_returns_zero():
+    knowledge = KnowledgeBase.__new__(KnowledgeBase)
+    knowledge.lock = threading.RLock()
+    knowledge.store = Mock()
+    knowledge.store.get.return_value = {"ids": ["old-1", "old-2"]}
+    knowledge._prepare_chunks = Mock(return_value=([], []))
+
+    assert knowledge.ingest() == 0
+    assert set(knowledge.store.delete.call_args.kwargs["ids"]) == {"old-1", "old-2"}
+    knowledge.store.add_documents.assert_not_called()
+
+
+def test_empty_knowledge_does_not_search_and_returns_message():
+    knowledge = KnowledgeBase.__new__(KnowledgeBase)
+    knowledge.lock = threading.RLock()
+    knowledge.store = Mock()
+    knowledge.store.get.return_value = {"ids": []}
+
+    assert knowledge.retrieve("问题") == []
+    assert "知识库为空" in knowledge.context("问题")
+    knowledge.store.similarity_search_with_score.assert_not_called()
+
+
+def test_delete_removes_docs_and_uploads_and_syncs(tmp_path, settings):
+    docs, uploads = tmp_path / "docs", tmp_path / "uploads"
+    docs.mkdir()
+    uploads.mkdir()
+    (docs / "course.md").write_text("课程资料", encoding="utf-8")
+    (uploads / "notes.txt").write_text("上传资料", encoding="utf-8")
+
+    knowledge = KnowledgeBase.__new__(KnowledgeBase)
+    knowledge.lock = threading.RLock()
+    knowledge.settings = replace(settings, docs_dir=docs)
+    knowledge.uploads_dir = uploads
+    knowledge.ingest = Mock(return_value=2)
+
+    assert "已删除 course.md" in knowledge.delete("course.md")
+    assert not (docs / "course.md").exists()
+    assert "已删除 uploads/notes.txt" in knowledge.delete("uploads/notes.txt")
+    assert not (uploads / "notes.txt").exists()
+    assert knowledge.ingest.call_count == 2
+
+
+def test_delete_rejects_outside_paths_and_missing_files(tmp_path, settings):
+    docs, uploads = tmp_path / "docs", tmp_path / "uploads"
+    docs.mkdir()
+    uploads.mkdir()
+
+    knowledge = KnowledgeBase.__new__(KnowledgeBase)
+    knowledge.lock = threading.RLock()
+    knowledge.settings = replace(settings, docs_dir=docs)
+    knowledge.uploads_dir = uploads
+    knowledge.ingest = Mock()
+
+    assert "来源名" in knowledge.delete("../.env")
+    assert "来源名" in knowledge.delete(str(tmp_path / "outside.txt"))
+    assert "来源名" in knowledge.delete("uploads/../outside.txt")
+    assert "未找到" in knowledge.delete("missing.md")
+    knowledge.ingest.assert_not_called()
+
+
+def test_delete_last_document_reports_empty_library(tmp_path, settings):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "course.md").write_text("课程资料", encoding="utf-8")
+
+    knowledge = KnowledgeBase.__new__(KnowledgeBase)
+    knowledge.lock = threading.RLock()
+    knowledge.settings = replace(settings, docs_dir=docs)
+    knowledge.uploads_dir = tmp_path / "uploads"
+    knowledge.ingest = Mock(return_value=0)
+
+    assert "知识库已清空" in knowledge.delete("course.md")
