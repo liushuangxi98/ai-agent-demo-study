@@ -149,9 +149,7 @@ class AgentApp:
         new_messages = result["messages"][len(input_messages):]
         model_messages = [message for message in new_messages if isinstance(message, AIMessage)]
         final_message = new_messages[-1] if new_messages else None
-        if not isinstance(final_message, AIMessage):
-            raise RuntimeError("模型没有返回有效的最终回答")
-        if final_message.tool_calls or not final_message.text.strip():
+        if not isinstance(final_message, AIMessage) or final_message.tool_calls or not final_message.text.strip():
             raise RuntimeError("模型没有返回有效的最终回答")
 
         answer = final_message.text

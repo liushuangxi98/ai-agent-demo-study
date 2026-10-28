@@ -133,9 +133,8 @@ class ConversationMemory:
 
         参数：会话 ID、用户原话、最终回答、工具/反思轨迹、画像变化、记录时间，
         以及关键字参数 usage（本轮与会话累计）和 summary（摘要快照）。
-        失败抛异常并整体回滚。
+        session_id 已由 Agent 入口校验；失败抛异常并整体回滚。
         """
-        session_id = validate_session_id(session_id)
         now = now or datetime.now().astimezone()
 
         turn = ConversationTurn(
@@ -180,10 +179,7 @@ class ConversationMemory:
 
         # 行锁 + 强制读最新值，避免并发更新互相覆盖。
         profile = session.get(UserMemory, user_id, with_for_update=True, populate_existing=True)
-        if profile is None:
-            raise RuntimeError("用户画像不存在，无法合并记忆")
-
-        # 整体换一个新字典，ORM 才能可靠识别 JSON 列变化。
+        # 前面已确保画像行存在；整体换新字典，ORM 才能可靠识别 JSON 列变化。
         profile.facts_json = merge_profile(profile.facts_json, changes, turn_id, now)
         profile.updated_at = func.current_timestamp()  # 更新时间取 MySQL 服务端时钟。
 
@@ -229,8 +225,7 @@ class ConversationMemory:
             ]
 
     def context(self, session_id: str) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
-        """参数：当前会话 ID；返回（摘要后的全部问答、上轮累计、摘要状态）。"""
-        session_id = validate_session_id(session_id)
+        """参数：当前会话 ID（已由 Agent 入口校验）；返回摘要后问答、上轮累计、摘要状态。"""
         latest_query = (
             select(ConversationTurn)
             .where(
@@ -248,14 +243,15 @@ class ConversationMemory:
 
             previous_usage = (latest.usage_json or {}).get("total", {})
             summary_state = latest.summary_json or {}
-            if not isinstance(summary_state, dict):
-                raise ValueError("历史摘要状态无效，请检查摘要正文与覆盖位置")
-
-            through_turn_id = summary_state.get("through_turn_id", 0)
+            through_turn_id = summary_state.get("through_turn_id", 0) if isinstance(summary_state, dict) else 0
             # 有摘要时，正文和游标必须同时有效，不能用损坏快照悄悄跳过原文。
-            if summary_state and (
-                not isinstance(summary_state.get("text"), str) or not summary_state["text"].strip()
-                or type(through_turn_id) is not int or not 0 < through_turn_id <= latest.id
+            if not isinstance(summary_state, dict) or (
+                summary_state and (
+                    not isinstance(summary_state.get("text"), str)
+                    or not summary_state["text"].strip()
+                    or type(through_turn_id) is not int
+                    or not 0 < through_turn_id <= latest.id
+                )
             ):
                 raise ValueError("历史摘要状态无效，请检查摘要正文与覆盖位置")
 

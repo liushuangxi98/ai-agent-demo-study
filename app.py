@@ -42,23 +42,17 @@ def switch_session() -> None:
 
 def handle_upload(app: AgentApp, files: list) -> None:
     """把选中的文件交给知识库，显示入库结果。"""
-    try:
-        uploads = [(file.name, file.getvalue()) for file in files]
-        with st.spinner("读取文档并建立知识库…"):
-            result = app.knowledge.upload(uploads)
-        st.success(f"已入库 {len(result['files'])} 份文档，知识库共 {result['chunks']} 个切片")
-    except Exception as error:
-        show_error(error)
+    uploads = [(file.name, file.getvalue()) for file in files]
+    with st.spinner("读取文档并建立知识库…"):
+        result = app.knowledge.upload(uploads)
+    st.success(f"已入库 {len(result['files'])} 份文档，知识库共 {result['chunks']} 个切片")
 
 
 def handle_sync(app: AgentApp) -> None:
     """重新读取知识原件、更新索引，显示切片总数。"""
-    try:
-        with st.spinner("切片与向量化中…"):
-            count = app.knowledge.ingest()
-        st.success(f"知识库已同步：{count} 个切片")
-    except Exception as error:
-        show_error(error)
+    with st.spinner("切片与向量化中…"):
+        count = app.knowledge.ingest()
+    st.success(f"知识库已同步：{count} 个切片")
 
 
 def handle_question(app: AgentApp, question: str) -> None:
@@ -272,10 +266,13 @@ def main() -> None:
 
     with st.sidebar:
         files, upload_clicked, sync_clicked = render_sidebar(app)
-        if upload_clicked:
-            handle_upload(app, files)
-        if sync_clicked:
-            handle_sync(app)
+        try:
+            if upload_clicked:
+                handle_upload(app, files)
+            if sync_clicked:
+                handle_sync(app)
+        except Exception as error:
+            show_error(error)
 
     try:
         question = render_chat(app)
