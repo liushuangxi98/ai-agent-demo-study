@@ -15,7 +15,7 @@ def build_embeddings(settings: Settings) -> OpenAIEmbeddings:
         model=settings.embedding_model,
         api_key=settings.llm_api_key,
         base_url=settings.llm_base_url,
-        request_timeout=30,
+        timeout=30,
         max_retries=1,
         chunk_size=10,  # 每次请求最多 10 条文本；不是 rag.py 的切片长度。
         check_embedding_ctx_length=False,  # 片段已切好，交给服务端判断长度。
